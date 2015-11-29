@@ -69,6 +69,9 @@ class Job(object):
     #: there will be times when an item is _too_ stale to be returned.
     fetch_on_stale_threshold = None
 
+    #: Whether to perform a synchronous refresh when broker queue is not working ok
+    fetch_on_failover = True
+
     #: Overrides options for `refresh_cache.apply_async` (e.g. `queue`).
     task_options = {}
 
@@ -248,19 +251,22 @@ class Job(object):
                 **self.task_options
             )
         except Exception as e:
-            # Handle exceptions from talking to RabbitMQ - eg connection
-            # refused.  When this happens, we try to run the task
-            # synchronously.
+            # Handle exceptions from talking to celery broker - e.g. connection
+            # refused.  When this happens, we try to run the task synchronously,
+            # unless we disabled sync failover.
+            if not self.fetch_on_failover:
+                logger.error("Unable to trigger task asynchronously - skipping", exc_info=True)
+                return
             logger.error("Unable to trigger task asynchronously - failing "
                          "over to synchronous refresh", exc_info=True)
             try:
-                return self.refresh(*args, **kwargs)
+                result = self.refresh(*args, **kwargs)
+                logger.debug("Failover synchronous refresh completed successfully")
+                return result
             except Exception as e:
                 # Something went wrong while running the task
                 logger.error("Unable to refresh data synchronously: %s", e,
                              exc_info=True)
-            else:
-                logger.debug("Failover synchronous refresh completed successfully")
 
     def get_constructor_args(self):
         return ()

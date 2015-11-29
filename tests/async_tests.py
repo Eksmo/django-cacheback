@@ -4,6 +4,7 @@ from django.core.cache import cache
 from django.test import TestCase
 from django.test.utils import override_settings
 import mock
+from cacheback import tasks
 
 from cacheback.base import Job
 
@@ -54,3 +55,28 @@ class TestJobWithStaleSyncRefreshAttributeSet(TestCase):
             mocktime.return_value = self.cache_time + 12
             self.assertEqual('testing', self.job.get())
             self.assertFalse(self.job.called_async)
+
+
+class NoFetchOnMissJob(Job):
+    fetch_on_miss = False
+
+    def fetch(self):
+        return 'testing'
+
+
+class NoSyncFetchJob(NoFetchOnMissJob):
+    fetch_on_failover = False
+
+
+@mock.patch.object(tasks.refresh_cache, 'apply_async', side_effect=Exception)
+class TestJobWithFailoverDisabled(TestCase):
+
+    def test_failover_enabled(self, mock_task):
+        job = NoFetchOnMissJob()
+        self.assertEqual(job.get(), None)
+        self.assertEqual(job.get(), 'testing')
+
+    def test_failover_disabled(self, mock_task):
+        job = NoSyncFetchJob()
+        self.assertEqual(job.get(), None)
+        self.assertEqual(job.get(), None)
